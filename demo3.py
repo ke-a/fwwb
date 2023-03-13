@@ -8,6 +8,7 @@ import pandas as pd
 # 读取微型气象站和标准站的数据
 mini_weather = pd.read_csv('micro1.csv')  # 读取微型气象站数据
 std_weather = pd.read_csv('standard.csv')  # 读取标准站数据
+mini_weather2 = pd.read_csv('micro2.csv')  # 读取微型气象站数据
 
 # 校正PM2.5、PM10和NO2数据
 
@@ -71,13 +72,15 @@ regressor.fit(X_train, y_train)  # 对训练数据进行模型拟合
 
 y_pred = regressor.predict(X_test)  # 对测试数据进行预测
 mse = mean_squared_error(y_test, y_pred)  # 计算均方误差
-print(mse)
-
+# print(mse)
 # import matplotlib.pyplot as plt
 # import seaborn as sns
 
 # sns.scatterplot(x='temperature', y='humidity', hue='cluster', data=mini_weather) # 绘制温度和湿度散点图，并根据聚类结果进行着色
 # plt.show() # 显示图形
+from sklearn.metrics import r2_score
+print(r2_score(y_test, y_pred))
+
 
 import joblib
 
