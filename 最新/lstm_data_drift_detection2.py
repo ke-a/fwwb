@@ -110,3 +110,72 @@ print('Test R2 Score: %.2f' % (test_score))
 #     print('新数据预测结果为：', prediction)
 # else:
 #     print('新数据异常')
+# 定义函数来检查可校准数据和异常数据
+def check_data(data, threshold):
+    # # 检查是否有空值
+    # if data.isnull().values.any():
+    #     print("Data contains missing values.")
+    #     return False
+    
+    # # 检查是否有重复行
+    # if data.duplicated().any():
+    #     print("Data contains duplicated rows.")
+    #     return False
+    
+    # 检查是否有极端值
+    if data.max().max() > threshold or data.min().min() < -threshold:
+        print("Data contains extreme values.")
+        return False
+    
+    return True
+
+# 初始化变量
+calibrate_count = 0
+calibrate_threshold = 0.05
+calibrated = False
+anomaly_detected = False
+
+# 读取原始数据并将时间转换为时间戳格式
+# data = pd.read_csv('micro1.csv')
+# data = data[['time','PM2.5', 'PM10', 'NO2', 'temperature', 'humidity']]
+# data['time'] = pd.to_datetime(data['time'])
+# data.set_index('time', inplace=True)
+# data = data.tail(int(len(data)*0.8))
+# new_data = data.head(2)
+train_len = int(len(data) * 0.8)
+new_data = data[train_len:train_len+1]
+a = 0
+# 开始循环读取新数据
+while True:
+    # 获取最后一条新数据，并进行检查
+    new_data = data.iloc[len(data)-len(new_data):]
+    data_scaled = scaler.transform(new_data)
+    last_data = data_scaled[-1:]
+    
+    if check_data(last_data, 5.0):
+        # 如果可校准数据出现，并且已经连续出现多次
+        if np.abs(last_data[0][0] - last_data[0][1]) <= calibrate_threshold and not calibrated:
+            calibrate_count += 1
+            if calibrate_count >= 3:
+                print("Calibration data detected.")
+                calibrated = True
+                calibrate_count = 0
+                continue
+
+        # 如果异常数据出现
+        elif np.abs(last_data[0][0] - last_data[0][1]) > 2 * calibrate_threshold and calibrated:
+            print("Anomaly detected.")
+            anomaly_detected = True
+
+        # 更新训练数据并重新训练模型
+        if calibrated and anomaly_detected:
+            train_size = int(len(data) * 0.8)
+            train_data = data_scaled[:train_size, :]
+            test_data = data_scaled[train_size:, :]
+            X_train, Y_train = create_dataset(train_data, look_back)
+            X_test, Y_test = create_dataset(test_data, look_back)
+            model.fit(X_train, Y_train, epochs=100, batch_size=64, validation_data=(X_test, Y_test), verbose=1)
+            calibrated = False
+            anomaly_detected = False
+    a+=1
+    print(a)
