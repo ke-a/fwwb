@@ -1,3 +1,4 @@
+#针对实时模型精度拟合的实验品
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
 from sklearn.neural_network import MLPRegressor
