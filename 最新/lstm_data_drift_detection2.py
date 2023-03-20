@@ -16,6 +16,37 @@ data1['time'] = pd.to_datetime(data1['time'])
 data1.set_index('time', inplace=True)
 data2['time'] = pd.to_datetime(data2['time'])
 data2.set_index('time', inplace=True)
+def correct_data(row):
+    pm25_diff = abs(row['PM2.5'] - data2.loc[row.name]
+                    ['PM2.5'])  # 计算微型气象站PM2.5数据与标准站PM2.5数据之差
+    pm10_diff = abs(row['PM10'] - data2.loc[row.name]
+                    ['PM10'])  # 计算微型气象站PM10数据与标准站PM10数据之差
+    no2_diff = abs(row['NO2'] - data2.loc[row.name]
+                   ['NO2'])  # 计算微型气象站NO2数据与标准站NO2数据之差
+    
+    humidity_diff = abs(row['humidity'] - data2.loc[row.name]
+                   ['humidity'])  # 计算微型气象站NO2数据与标准站NO2数据之差
+
+    temperature_diff = abs(row['temperature'] - data2.loc[row.name]
+                   ['temperature'])  # 计算微型气象站NO2数据与标准站NO2数据之差
+    # 如果PM2.5数据误差大于20或为NaN，则将其修正为标准站数据
+    if pm25_diff > 2 or np.isnan(pm25_diff):
+        row['PM2.5'] = data2.loc[row.name]['PM2.5']
+    # 如果PM10数据误差大于20或为NaN，则将其修正为标准站数据
+    if pm10_diff > 2 or np.isnan(pm10_diff):
+        row['PM10'] = data2.loc[row.name]['PM10']
+    if no2_diff > 2 or np.isnan(no2_diff):  # 如果NO2数据误差大于20或为NaN，则将其修正为标准站数据
+        row['NO2'] = data2.loc[row.name]['NO2']
+    if humidity_diff > 2 or np.isnan(humidity_diff):
+        row['humidity'] = data2.loc[row.name]['humidity']
+    if temperature_diff > 2 or np.isnan(temperature_diff):  # 如果NO2数据误差大于20或为NaN，则将其修正为标准站数据
+        row['temperature'] = data2.loc[row.name]['temperature']
+    return row
+
+
+data1 = data1.apply(
+    correct_data, axis=1)  # 应用correct_data函数对每一行进行校正
+
 
 # 合并两个数据集，按照时间排序
 data = pd.concat([data1, data2], axis=1)
@@ -27,7 +58,7 @@ scaler = MinMaxScaler()
 data_scaled = scaler.fit_transform(data)
 
 # 分离训练集和测试集
-train_size = int(len(data) * 0.8)
+train_size = int(len(data) * 0.7)
 train_data = data_scaled[:train_size, :]
 test_data = data_scaled[train_size:, :]
 
@@ -41,25 +72,27 @@ def create_dataset(dataset, look_back=1):
     return np.array(X), np.array(Y)
 
 # 准备训练和测试数据
-look_back = 3
+look_back =3
 X_train, Y_train = create_dataset(train_data, look_back)
 X_test, Y_test = create_dataset(test_data, look_back)
 
 # 创建LSTM模型
 model = Sequential()
-model.add(LSTM(units=64, input_shape=(X_train.shape[1], X_train.shape[2]), return_sequences=True))
-model.add(Dropout(0.2))
-model.add(LSTM(units=32, return_sequences=True))
-model.add(Dropout(0.2))
-model.add(LSTM(units=16))
-model.add(Dropout(0.2))
+model.add(LSTM(units=96, input_shape=(X_train.shape[1], X_train.shape[2]), return_sequences=True))
+model.add(Dropout(0.1))#原本是2
+model.add(LSTM(units=64, return_sequences=True))
+model.add(Dropout(0.1))
+model.add(LSTM(units=32))
+model.add(Dropout(0.15))
+# model.add(LSTM(units=16))
+# model.add(Dropout(0.1))
 model.add(Dense(Y_train.shape[1]))
 
 # 编译模型
 model.compile(loss='mean_squared_error', optimizer='adam')
 
 # 训练模型
-history = model.fit(X_train, Y_train, epochs=200, batch_size=64, validation_data=(X_test, Y_test), verbose=1)
+history = model.fit(X_train, Y_train, epochs=400, batch_size=40, validation_data=(X_test, Y_test), verbose=1)
 
 # 预测结果
 train_predict = model.predict(X_train)
@@ -76,106 +109,64 @@ train_score = r2_score(Y_train[:,0], train_predict[:,0])
 print('Train R2 Score: %.2f' % (train_score))
 test_score = r2_score(Y_test[:,0], test_predict[:,0])
 print('Test R2 Score: %.2f' % (test_score))
+import numpy as np
+from sklearn.ensemble import IsolationForest
+# 定义孤立森林模型的树数量和子采样大小
+n_trees = 100
+subsample_size = 256
 
-# # 定义函数检查新数据
-# print("start check data")
-# def check_data(new_data):
-#     print("start check data")
-#     # 转换为numpy数组
-#     new_data = np.array(new_data).reshape(1, -1)
-#     # 归一化
-#     new_data_scaled = scaler.transform(new_data)
-#     # 生成序列数据
-#     X_new = []
-#     for i in range(len(new_data_scaled)-look_back):
-#         a = new_data_scaled[i:(i+look_back), :]
-#         X_new.append(a)
-#     # 预测输出值
-#     y_new = model.predict(np.array(X_new))
-#     # 反归一化
-#     y_new = scaler.inverse_transform(y_new)[0]
-#     # 计算偏差
-#     deviation = np.abs(new_data - y_new)
-#     # 检查是否异常
-#     if np.any(deviation > 0.1):
-#         return False, '数据异常'
+# 创建字典以存储每个特征的孤立森林模型
+clfs = {}
+train_data = pd.DataFrame(train_data)
+# 循环遍历数据集中的每个特征并训练一个孤立森林模型
+for column_name in train_data.columns:
+    # 提取特征值
+    column_data = train_data[column_name].values.reshape(-1, 1)
+    
+    # 训练孤立森林模型
+    model = IsolationForest(n_estimators=n_trees, max_samples=subsample_size, random_state=42)
+    model.fit(column_data)
+    
+    # 存储已训练的模型
+    clfs[column_name] = model
+
+
+def diff(predict_data,original_data):
+    # 定义函数来计算预测数据和原始数据之间的差异
+    diff = 0
+    for i,value in enumerate(predict_data):
+        diff+=abs(value-original_data[i]);
+    return diff/len(predict_data);
+# def check_data(predict_data, original_data, threshold, threshold2, row, queue):
+#     diff = diff(predict_data, original_data)
+#     if diff <= threshold:
+#        #小于的话就是可校准数据
+#         data1[row] = predict_data
+#         queue.append(row)
+#         total = sum(queue)
+#         if total / len(queue) > threshold2:
+#             # 重新训练模型
+#             train_size = int(row)
+#             train_data = data_scaled[:train_size, :]
+#             test_data = data_scaled[train_size:, :]
+#             X_train, Y_train = create_dataset(train_data, look_back)
+#             X_test, Y_test = create_dataset(test_data, look_back)
+#             model.fit(X_train, Y_train, epochs=400, batch_size=40, validation_data=(X_test, Y_test), verbose=1)
+#             queue.clear()
+#         return queue
 #     else:
-#         return True, y_new
+#         #否则属于异常数据
+#         #还需要判断具体是微站损坏还是微站异常
+#         print("异常数据：", row)
+
+# train_len = int(len(data) * 0.3)
+# import queue
+# q = queue.Queue(maxsize=3)
+# for i in range(train_len,len(data)):
+#     predict_data = model.predict(data[i][0])
+#     #反归一化
+#     predict_data = scaler.inverse_transform(predict_data)
+#     original_data = data[i]
+#     q = check_data(predict_data,original_data[0:6],0.05,0.3,i,q)
 
 
-#从data1中拿出一行数据
-# final_data = [5,6,5,5,5]
-# is_valid, prediction = check_data(final_data)
-# if is_valid:
-#     print('新数据预测结果为：', prediction)
-# else:
-#     print('新数据异常')
-# 定义函数来检查可校准数据和异常数据
-def check_data(data, threshold):
-    # # 检查是否有空值
-    # if data.isnull().values.any():
-    #     print("Data contains missing values.")
-    #     return False
-    
-    # # 检查是否有重复行
-    # if data.duplicated().any():
-    #     print("Data contains duplicated rows.")
-    #     return False
-    
-    # 检查是否有极端值
-    if data.max().max() > threshold or data.min().min() < -threshold:
-        print("Data contains extreme values.")
-        return False
-    
-    return True
-
-# 初始化变量
-calibrate_count = 0
-calibrate_threshold = 0.05
-calibrated = False
-anomaly_detected = False
-
-# 读取原始数据并将时间转换为时间戳格式
-# data = pd.read_csv('micro1.csv')
-# data = data[['time','PM2.5', 'PM10', 'NO2', 'temperature', 'humidity']]
-# data['time'] = pd.to_datetime(data['time'])
-# data.set_index('time', inplace=True)
-# data = data.tail(int(len(data)*0.8))
-# new_data = data.head(2)
-train_len = int(len(data) * 0.8)
-new_data = data[train_len:train_len+1]
-a = 0
-# 开始循环读取新数据
-while True:
-    # 获取最后一条新数据，并进行检查
-    new_data = data.iloc[len(data)-len(new_data):]
-    data_scaled = scaler.transform(new_data)
-    last_data = data_scaled[-1:]
-    
-    if check_data(last_data, 5.0):
-        # 如果可校准数据出现，并且已经连续出现多次
-        if np.abs(last_data[0][0] - last_data[0][1]) <= calibrate_threshold and not calibrated:
-            calibrate_count += 1
-            if calibrate_count >= 3:
-                print("Calibration data detected.")
-                calibrated = True
-                calibrate_count = 0
-                continue
-
-        # 如果异常数据出现
-        elif np.abs(last_data[0][0] - last_data[0][1]) > 2 * calibrate_threshold and calibrated:
-            print("Anomaly detected.")
-            anomaly_detected = True
-
-        # 更新训练数据并重新训练模型
-        if calibrated and anomaly_detected:
-            train_size = int(len(data) * 0.8)
-            train_data = data_scaled[:train_size, :]
-            test_data = data_scaled[train_size:, :]
-            X_train, Y_train = create_dataset(train_data, look_back)
-            X_test, Y_test = create_dataset(test_data, look_back)
-            model.fit(X_train, Y_train, epochs=100, batch_size=64, validation_data=(X_test, Y_test), verbose=1)
-            calibrated = False
-            anomaly_detected = False
-    a+=1
-    print(a)
