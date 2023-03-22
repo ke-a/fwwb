@@ -14,7 +14,9 @@ for column_name in train_data.columns:
     # 训练孤立森林模型
     model = IsolationForest(n_estimators=n_trees, max_samples=subsample_size, random_state=42)
     model.fit(column_data)
-    
+
+
+
     # 存储已训练的模型
     clfs[column_name] = model
 outliers = queue.Queue(5)
@@ -48,18 +50,19 @@ def detect_outliers(predict_data, original_data,outliers):
             outliers.append('z_score_max')
 
     return outliers
-def check_error(predict_data):
-    for i in predict_data:
-        if clfs[i].predict(predict_data[i]) == -1:
-            return True
-def detect_outliers2(predict_data, original_data,outliers,outliers1):
-       if check_error(predict_data[1:7]):
-           outliers.append((predict_data,original_data)) 
-           for i,value in enumerate(predict_data[1:7]):
-               if clfs[i].predict(predict_data[i]) == -1:
-                   outliers1.append(value)
-       if outliers.full():
-            
+# def check_error(predict_data):
+#     for i in predict_data:
+#         if clfs[i].predict(predict_data[i]) == -1:
+#             return True
+# def detect_outliers2(predict_data, original_data,outliers,outliers1):
+#        if check_error(predict_data[1:7]):
+#            outliers.append((predict_data,original_data)) 
+#            for i,value in enumerate(predict_data[1:7]):
+#                if clfs[i].predict(predict_data[i]) == -1:
+#                    outliers1.append(value)
+#        if outliers.full():
+
+
            
 
 def diff(predict_data,original_data):
