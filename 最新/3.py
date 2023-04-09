@@ -7,7 +7,8 @@ from keras.layers import LSTM, Dense, Dropout
 from keras.wrappers.scikit_learn import KerasRegressor
 from sklearn.model_selection import GridSearchCV
 from sklearn.model_selection import TimeSeriesSplit
-
+from sklearn.ensemble import IsolationForest
+import queue
 # Read data
 data1 = pd.read_csv('micro1.csv')
 data2 = pd.read_csv('standard.csv')
@@ -37,13 +38,12 @@ def correct_data(row):
         row['temperature'] = data2.loc[row.name]['temperature']
     return row
 
-data1 = data1.apply(correct_data, axis=1) 
-
+data1.iloc[:int(len(data1)*0.3)] = data1.iloc[:int(len(data1)*0.3)].apply(correct_data, axis=1)
 data = pd.concat([data1, data2], axis=1)
 data = data.loc[:,~data.columns.duplicated()]
 data = data.reindex(sorted(data.columns), axis=1)
 
-# Scale data
+    # Scale data
 scaler = MinMaxScaler()
 data_scaled = scaler.fit_transform(data)
 
@@ -51,7 +51,8 @@ data_scaled = scaler.fit_transform(data)
 train_size = int(len(data) * 0.7)
 train_data = data_scaled[:train_size, :]
 test_data = data_scaled[train_size:, :]
-
+train_clf = data1.iloc[:train_size, :]
+train_clf = train_clf[['PM2.5', 'PM10', 'NO2', 'temperature', 'humidity']]
 # Define function to generate batch data
 def create_dataset(dataset, look_back=1):
     X, Y = [], []
@@ -85,37 +86,44 @@ param_grid = {'units': [64, 96, 128],
               'dropout': [0.1, 0.2, 0.3]}
 
 # Use TimeSeriesSplit for cross-validation
-tscv = TimeSeriesSplit(n_splits=5)
-grid = GridSearchCV(estimator=model, param_grid=param_grid, cv=tscv, verbose=1, n_jobs=-1)
+# tscv = TimeSeriesSplit(n_splits=5)
+# grid = GridSearchCV(estimator=model, param_grid=param_grid, cv=tscv, verbose=1, n_jobs=-1)
 
 # Train model and output best score and parameters
-grid_result = grid.fit(X_train, Y_train)
-print("Best Score: %f using %s" % (grid_result.best_score_, grid_result.best_params_))
+# grid_result = grid.fit(X_train, Y_train)
+# print("Best Score: %f using %s" % (grid_result.best_score_, grid_result.best_params_))
 
-# Predict results
-train_predict = grid.predict(X_train)
-test_predict = grid.predict(X_test)
+# # Predict results
+# train_predict = grid.predict(X_train)
+# test_predict = grid.predict(X_test)
 
 # Reverse scaling
-train_predict = scaler.inverse_transform(train_predict)
+# train_predict = scaler.inverse_transform(train_predict)
 Y_train = scaler.inverse_transform(Y_train)
-test_predict = scaler.inverse_transform(test_predict)
+# test_predict = scaler.inverse_transform(test_predict)
 Y_test = scaler.inverse_transform(Y_test)
 
 # Calculate r2 score
-train_score = r2_score(Y_train[:,0], train_predict[:,0])
-print('Train R2 Score: %.2f' % (train_score))
-test_score = r2_score(Y_test[:,0], test_predict[:,0])
-print('Test R2 Score: %.2f' % (test_score))
+# train_score = r2_score(Y_train[:,0], train_predict[:,0])
+# print('Train R2 Score: %.2f' % (train_score))
+# test_score = r2_score(Y_test[:,0], test_predict[:,0])
+# print('Test R2 Score: %.2f' % (test_score))
+
+import pickle
+
+# # Save model
+# with open('model.pkl', 'wb') as file:
+#     pickle.dump(grid_result.best_estimator_, file)
+
+# Load model
+# with open('model.pkl', 'rb') as file:
+#     model = pickle.load(file)
 
 
-train_data = train_data[['PM2.5', 'PM10', 'NO2', 'temperature', 'humidity']]
 #训练孤独森林模型用于异常检测
-from sklearn.ensemble import IsolationForest
 clf = IsolationForest(n_estimators=100, max_samples='auto', contamination=float(0.1),max_features=1.0, bootstrap=False, n_jobs=-1, random_state=42, verbose=0)
-clf.fit(train_data)
+clf.fit(train_clf)
 #预测
-import queue
 outlier = queue.Queue(5)
 def detect_outliers(predict_data,original_data,outlier):
     
@@ -179,19 +187,64 @@ def check_data(predict_data,original_data,row,queue,threshold):
 train_len = int(len(data)*0.3)
 import queue
 q = queue.Queue(maxsize=5)
-for i in range(train_len,len(data)):
-    predict_data = model.predict(data[i][0])
-    #反归一化
+data = pd.read_csv('micro1.csv')
+data = data[['time','PM2.5', 'PM10', 'NO2', 'temperature', 'humidity']]
+data['time'] = pd.to_datetime(data['time'])
+data.set_index('time', inplace=True)
+data = data.apply(correct_data,axis=1)
+# data['time'] = pd.to_datetime(data['time'])
+
+# data.set_index('time', inplace=True)
+look_back = 3
+num_features = 5
+for index, row in data[train_len+1:].iterrows():
+# for i in range(train_len,len(data)):
+    timestamp = index 
+    print(timestamp)
+    print(data.loc[timestamp])
+    data_point = data.loc[timestamp].values.reshape(1, look_back, num_features)
+    scaled_data_point = scaler.transform(data_point)
+    prediction = model.predict(scaled_data_point)
+    prediction = scaler.inverse_transform(prediction)
+    timestamp = pd.to_datetime(data['time'])
+    timestamp = index
+    print(row)
+    # 获取前n个时间步长的数据
+    predict_data = data.loc[timestamp].values.reshape(1, -1)
+    predicted_data_scaled = scaler.transform(predict_data)
+    predicted_data,_ = create_dataset(predicted_data_scaled, look_back)
+    
+    previous_data = data.loc[timestamp - pd.Timedelta(minutes=60*(look_back-1)):timestamp]
+    # 缩放数据
+    # 检查数据是否为空
+    if previous_data.empty:
+        continue
+
+    # 重新塑造数据
+
+    # 使用模型进行预测
+    prediction = model.predict(predicted_data)
+    prediction = scaler.inverse_transform(prediction)
+    # 反向缩放
+    predicted_data = scaler.inverse_transform(predicted_data_scaled)
+
+    print(predict_data)
+    # 反归一化
     predict_data = scaler.inverse_transform(predict_data)
-    original_data = data[i]
-    q,sign = check_data(predict_data[1:7],original_data[1:7],i,q,0.1)
+    
+    predict_data = row
+    predict_data_scaled = scaler.transform(predict_data)
+    
+
+    original_data = index[1:7] 
+    q,sign = check_data(predict_data[1:7],original_data,index,q,0.1)
     if sign == 'damage':
     # 如果是微站损坏，则记录日志并发送警报
-        print("微站损坏：", i)
+        print("微站损坏：", index)
     # TODO: 发送警报到管理系统
     elif sign == 'abnormal':
     # 如果是微站异常，则记录日志和异常类型，并进行维护
-        print("微站异常：", i)
+        print("微站异常：", index)
         print("异常类型：", q[-1])
     # TODO: 记录日志和异常类型，进行维护操作
 
